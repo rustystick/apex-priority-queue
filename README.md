@@ -56,7 +56,7 @@ Salesforce's `Queuable` framework allows chaining natively, however there is a l
 
 # To use PriorityQueue
 
-## Define a NTFH_PriorityQueueable
+## Define a PriorityQueueable 
 - Create a class implementing `PriorityQueueable` interface
 
 ## Adding item to priority queue
