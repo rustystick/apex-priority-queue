@@ -1,0 +1,49 @@
+image: axie002/sfdxcli
+
+definitions:
+  steps:
+    - step: &push-and-run-test
+        name: Push SFDX and Run Test
+        script:
+          - git config --global --add safe.directory /opt/atlassian/pipelines/agent/build
+          - git fetch origin $BITBUCKET_PR_DESTINATION_BRANCH
+          - if [ -z ${ScratchOrgAlias} ]; then export ScratchOrgAlias=ci-validate-scratch-org; fi
+          - if [ -z ${SFDX_JWT_KEY} ]; then echo "Auth requires a base64 encoded server key set in SFDX_JWT_KEY pipeline variable"; exit 1; fi
+          - if [ -z ${SFDX_CONSUMER_KEY} ]; then echoc "Auth requires consumer key set in SFDX_CONSUMER_KEY pipeline variable"; exit 1; fi
+          - if [ -z ${SFDX_DEVHUB_USERNAME} ]; then echo "Auth requires devhub username to be set in SFDX_DEVHUB_USERNAME pipeline variable"; exit 1; fi    
+          - if git diff $BITBUCKET_COMMIT origin/$BITBUCKET_PR_DESTINATION_BRANCH --name-only | grep cls -q; then export HasApex=True; else export HasApex=False; fi
+          - echo Creating key file
+          - echo ${SFDX_JWT_KEY} | base64 -d > ./server.key
+          - sfdx auth:jwt:grant --clientid ${SFDX_CONSUMER_KEY} --jwtkeyfile ./server.key --username ${SFDX_DEVHUB_USERNAME} --setdefaultdevhubusername --setalias devhub
+          - sfdx force:org:create -s -f config/project-scratch-def.json -a $ScratchOrgAlias -d 1
+          - sfdx force:org:open -u $ScratchOrgAlias
+          - sfdx force:source:push -u $ScratchOrgAlias
+          - if [ $HasApex = True ]; then echo "commit has apex... running test"; sfdx force:apex:test:run -u $ScratchOrgAlias -c -d test-results -r junit -w 50; else echo "commit has no apex, skipping test run"; fi
+          - sfdx force:org:delete -u $ScratchOrgAlias
+    - step: &release-unlocked-package
+        name: Release unlocked package
+        script:
+          - git config --global --add safe.directory /opt/atlassian/pipelines/agent/build
+          - if [ -z ${SFDX_JWT_KEY} ]; then echo "Auth requires a base64 encoded server key set in SFDX_JWT_KEY pipeline variable"; exit 1; fi
+          - if [ -z ${SFDX_CONSUMER_KEY} ]; then echoc "Auth requires consumer key set in SFDX_CONSUMER_KEY pipeline variable"; exit 1; fi
+          - if [ -z ${SFDX_DEVHUB_USERNAME} ]; then echo "Auth requires devhub username to be set in SFDX_DEVHUB_USERNAME pipeline variable"; exit 1; fi
+          - echo Creating key file
+          - echo ${SFDX_JWT_KEY} | base64 -d > ./server.key
+          - sfdx auth:jwt:grant --clientid ${SFDX_CONSUMER_KEY} --jwtkeyfile ./server.key --username ${SFDX_DEVHUB_USERNAME} --setdefaultdevhubusername --setalias devhub
+          - prjPath=$(echo $(cat sfdx-project.json | grep path | awk '{printf $2}' | sed 's/[",]//g'))
+          - sfdx force:package:version:create -x -c -w 50 -d $prjPath > PackageVersionCreateOutput
+          - version=$(cat PackageVersionCreateOutput | grep Id | awk '{printf($11)}')
+          - mv README.md README.old.md
+          - cat README.old.md | sed "s/04t.\{15\}/${version}/g" > README.md
+          - git add sfdx-project.json README.md
+          - git commit -m "releasing new package version and update install url"
+          - git push origin HEAD:main
+          - sfdx force:package:version:promote -p $version --noprompt
+
+pipelines:
+  pull-requests:
+    feature/*:
+      - step: *push-and-run-test
+  tags:
+    release-*:
+      - step: *release-unlocked-package
