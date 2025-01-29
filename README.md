@@ -38,7 +38,6 @@ Salesforce's `Queuable` framework allows chaining natively, however there is a l
  B --> |yes| D(set priority)
  C --> E(add to list)
  D --> E
- E --> F(sort)
  ```
 
 ## Execution
